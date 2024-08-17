@@ -1,0 +1,3 @@
+jax[cuda]==0.4.31
+nanobind==2.1.0
+numpy==2.0.1
