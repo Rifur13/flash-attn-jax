@@ -1,4 +1,4 @@
-// (TODO pobudzey): add file guard
+#pragma once
 
 #include "xla/ffi/api/ffi.h"
 

@@ -8,7 +8,7 @@ set(CMAKE_CUDA_ARCHITECTURES 90)
 find_package(CUDA REQUIRED)
 find_package(Python 3.8 COMPONENTS Interpreter Development.Module REQUIRED)
 
-add_library(flash-attn SHARED "flash_attention_hopper.cc")
+add_library(flash-attn SHARED "src/flash_attention_hopper.cc")
 
 ####################
 # Fetch dependencies
@@ -51,7 +51,7 @@ find_package(nanobind CONFIG REQUIRED)
 target_sources(
   flash-attn
   PUBLIC
-  ${CMAKE_CURRENT_SOURCE_DIR}/flash_attention_hopper.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/flash_attention_hopper.cc
   ${dao-ai-lab_SOURCE_DIR}/hopper/flash_fwd_hdim128_fp16_sm90.cu
   ${dao-ai-lab_SOURCE_DIR}/hopper/flash_bwd_hdim128_fp16_sm90.cu
 )
@@ -82,7 +82,7 @@ target_include_directories(
   flash-attn PUBLIC
   ${nanobind_INCLUDE_DIRS}
   ${Python_INCLUDE_DIRS}
-  ${CMAKE_CURRENT_LIST_DIR}
+  ${CMAKE_CURRENT_LIST_DIR}/src
   ${CUDA_INCLUDE_DIRS}
   ${XLA_DIR}
   ${cutlass_SOURCE_DIR}/include
@@ -92,13 +92,13 @@ target_include_directories(
 nanobind_add_module(
   flash_attn_jax_lib
   NB_STATIC STABLE_ABI LTO NOMINSIZE NB_DOMAIN flash-attn
-  ${CMAKE_CURRENT_SOURCE_DIR}/flash_attention_hopper_api.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/flash_attention_hopper_api.cc
 )
 
 target_link_libraries(flash_attn_jax_lib PUBLIC flash-attn)
 target_include_directories(flash_attn_jax_lib PUBLIC 
     ${XLA_DIR} 
-    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
 install(TARGETS flash_attn_jax_lib LIBRARY DESTINATION ${CMAKE_CURRENT_LIST_DIR})

@@ -5,9 +5,7 @@ import pytest
 import jax.nn as nn
 
 from jax._src.typing import DTypeLike
-
 from flash_attention import flash_attention_hopper_fwd
-
 
 @pytest.mark.parametrize("dtype", [jnp.float16])
 @pytest.mark.parametrize("softmax_scale", [0.2, 0.5])
