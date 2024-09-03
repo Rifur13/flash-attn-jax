@@ -38,7 +38,7 @@ mkdir -p build && cd build
 cmake .. && make -j $NUM_WORKERS
 ```
 
-Make your new python bindings accessible to python.
+Make your new python bindings accessible to python. Run this from the build directory.
 ```
 export PYTHONPATH=$PYTHONPATH:$(pwd)
 ```
@@ -50,8 +50,15 @@ Simply import the python library
 import flash_attn_jax_lib
 ```
 
+To run the tests:
+
+```
+pytest python/test.py
+```
+
 
 ### 4. Next steps
+- Support backwards pass.
 - Support more datatypes: bfloat16, and float8 when it's released.
 - Support more head_dim sizes.
 - Support variables sequence lengths.
