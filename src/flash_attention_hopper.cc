@@ -65,7 +65,8 @@ void set_params_fprop(
     int window_size_left,
     int window_size_right,
     bool seqlenq_ngroups_swapped = false,
-    bool unpadded_lse = false) {
+    bool unpadded_lse = false
+) {
   const int64_t batch_size = query.dimensions()[0];
   const int64_t seqlen_q = query.dimensions()[1];
   const int64_t num_heads = query.dimensions()[2];
@@ -179,6 +180,7 @@ void set_params_fprop(
   params.unpadded_lse = unpadded_lse;
 }
 
+
 ffi::Error FlashAttentionHopperF16FwdImpl(
     cudaStream_t stream,
     ffi::Buffer<ffi::DataType::F16> query,
@@ -212,7 +214,7 @@ ffi::Error FlashAttentionHopperF16FwdImpl(
       /*cu_seqlens_q_d=*/nullptr,
       /*cu_seqlens_k_d=*/nullptr,
       /*seqused_k=*/nullptr,
-      /*p_d*/ nullptr,
+      /*p_d*/nullptr,
       softmax_lse->untyped_data(),
       /*p_dropout=*/0.f,
       softmax_scale,
@@ -226,34 +228,12 @@ ffi::Error FlashAttentionHopperF16FwdImpl(
   } else {
     return ffi::Error(
         ffi::ErrorCode::kInvalidArgument,
-        "Only a head_dim if 128 is supported right now.");
+        "Only a head_dim of 128 is supported right now.");
   }
 
   return ffi::Error::Success();
 }
 
-ffi::Error FlashAttentionHopperF16BwdImpl(
-    cudaStream_t stream,
-    ffi::Buffer<ffi::DataType::F16> dout,
-    ffi::Buffer<ffi::DataType::F16> query,
-    ffi::Buffer<ffi::DataType::F16> key,
-    ffi::Buffer<ffi::DataType::F16> value,
-    ffi::Buffer<ffi::DataType::F16> out,
-    ffi::Buffer<ffi::DataType::F32> softmax_lse,
-    ffi::Buffer<ffi::DataType::F32> softmax_d,
-    ffi::Buffer<ffi::DataType::F32> dq_accum,
-    ffi::Buffer<ffi::DataType::S32> dq_semaphore,
-    const float softmax_scale,
-    const bool is_causal,
-    ffi::Result<ffi::Buffer<ffi::DataType::F16>> dq,
-    ffi::Result<ffi::Buffer<ffi::DataType::F16>> dk,
-    ffi::Result<ffi::Buffer<ffi::DataType::F16>> dv) {
-  if (query.dimensions().size() != 4 || key.dimensions().size() != 4 ||
-      value.dimensions().size() != 4) {
-    return ffi::Error(
-        ffi::ErrorCode::kInvalidArgument, "query/key/value must be 4-dim");
-  }
-}
 
 XLA_FFI_DEFINE_HANDLER_SYMBOL(
     FlashAttentionHopperF16Fwd,
