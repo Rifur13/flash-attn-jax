@@ -52,7 +52,9 @@ target_sources(
   flash-attn
   PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/src/flash_attention_hopper.cc
+  ${dao-ai-lab_SOURCE_DIR}/hopper/flash_fwd_hdim64_fp16_sm90.cu
   ${dao-ai-lab_SOURCE_DIR}/hopper/flash_fwd_hdim128_fp16_sm90.cu
+  ${dao-ai-lab_SOURCE_DIR}/hopper/flash_fwd_hdim256_fp16_sm90.cu
   ${dao-ai-lab_SOURCE_DIR}/hopper/flash_bwd_hdim128_fp16_sm90.cu
 )
 

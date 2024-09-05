@@ -13,17 +13,12 @@ def _check_shape(array: jax.Array, expected_shape: Sequence[int], name: str):
   if array.shape != expected_shape:
     raise ValueError(f"{name} should have shape: {expected_shape}, but got {array.shape}.")
 
-def _check_is_multiple(n1: int, n2: int, name: str):
-    if n1 % n2 != 0:
-      raise ValueError(f"{name} must be a multiple of {n2}.")
-
 def _check_dtype(array: jax.Array, dtypes: DType | Sequence[DType], name: str):
   if isinstance(dtypes, DType):
     dtypes = (dtypes, )
 
   if all(array.dtype != d for d in dtypes):
     raise ValueError(f"{name} must be of type {dtypes}, but is {array.dtype}.")
-
 
 def flash_attention_hopper_fwd(
     query: jax.Array,
@@ -43,16 +38,14 @@ def flash_attention_hopper_fwd(
   _check_dtype(key, query.dtype, "key")
   _check_dtype(value, query.dtype, "value")
 
-  _check_is_multiple(seq_len_q, 128, "seq_len_q")
-  _check_is_multiple(seq_len_kv, 128, "seq_len_kv")
-  _check_is_multiple(num_heads_q, 32, "seq_len_q")
-  _check_is_multiple(num_heads_kv, 32, "num_heads_kv")
-
   _check_shape(key, (batch_size, seq_len_kv, num_heads_kv, head_dim), "key")
   _check_shape(value, (batch_size, seq_len_kv, num_heads_kv, head_dim), "value")
 
-  if head_dim != 128:
-    raise ValueError("Only head_dims of 128 are supported right now.")
+  if seq_len_q != seq_len_kv:
+    raise ValueError("Query and Key/Value sequence lengths must be equal, but got {seq_len_q} vs {seq_len_kv}.")
+
+  if head_dim not in [64, 128, 256]:
+    raise ValueError(f"head_dim must be one of [64, 128, 256], but got {head_dim}.")
 
   if num_heads_q % num_heads_kv != 0:
     raise ValueError(f"The number of query heads must be a multiple of "

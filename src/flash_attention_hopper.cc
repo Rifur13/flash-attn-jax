@@ -55,6 +55,10 @@ void set_params_fprop(
     ffi::Buffer<ffi::DataType::F16> key,
     ffi::Buffer<ffi::DataType::F16> value,
     ffi::Result<ffi::Buffer<ffi::DataType::F16>> out,
+    const size_t seqlen_q,
+    const size_t seqlen_k,
+    const size_t seqlen_q_rounded,
+    const size_t seqlen_k_rounded,
     void* cu_seqlens_q_d,
     void* cu_seqlens_k_d,
     void* seqused_k,
@@ -68,14 +72,10 @@ void set_params_fprop(
     bool unpadded_lse = false
 ) {
   const int64_t batch_size = query.dimensions()[0];
-  const int64_t seqlen_q = query.dimensions()[1];
   const int64_t num_heads = query.dimensions()[2];
   const int64_t head_dim = query.dimensions()[3];
-  const int64_t seqlen_kv = key.dimensions()[1];
   const int64_t num_heads_kv = key.dimensions()[2];
 
-  const int seqlen_q_rounded = seqlen_q;
-  const int seqlen_kv_rounded = seqlen_kv;
   const int d_rounded = head_dim;
 
   // XLA forces a row-major layout on all arrays.
@@ -137,9 +137,9 @@ void set_params_fprop(
   params.h_k = num_heads_kv;
   params.h_h_k_ratio = num_heads / num_heads_kv;
   params.seqlen_q = seqlen_q;
-  params.seqlen_k = seqlen_kv;
+  params.seqlen_k = seqlen_k;
   params.seqlen_q_rounded = seqlen_q_rounded;
-  params.seqlen_k_rounded = seqlen_kv_rounded;
+  params.seqlen_k_rounded = seqlen_k_rounded;
   params.d = head_dim;
   params.d_rounded = d_rounded;
 
@@ -168,10 +168,10 @@ void set_params_fprop(
   params.is_causal = window_size_left < 0 && window_size_right == 0;
 
   if (window_size_left < 0 && window_size_right >= 0) {
-    window_size_left = seqlen_kv;
+    window_size_left = seqlen_k;
   }
   if (window_size_left >= 0 && window_size_right < 0) {
-    window_size_right = seqlen_kv;
+    window_size_right = seqlen_k;
   }
   params.window_size_left = window_size_left;
   params.window_size_right = window_size_right;
@@ -204,6 +204,13 @@ ffi::Error FlashAttentionHopperF16FwdImpl(
         "tile_count_semaphore must be 1-dim and hold a single int32 value.");
   }
 
+  const int seqlen_q = query.dimensions()[1];
+  const int seqlen_k = query.dimensions()[1];
+
+  auto round_multiple = [](int x, int m) { return (x + m - 1) / m * m; };
+  const int seqlen_q_rounded = round_multiple(seqlen_q, 128);
+  const int seqlen_k_rounded = round_multiple(seqlen_k, 128);
+
   Flash_fwd_params params;
   set_params_fprop(
       params,
@@ -211,6 +218,8 @@ ffi::Error FlashAttentionHopperF16FwdImpl(
       key,
       value,
       res,
+      seqlen_q, seqlen_k,
+      seqlen_q_rounded, seqlen_k_rounded,
       /*cu_seqlens_q_d=*/nullptr,
       /*cu_seqlens_k_d=*/nullptr,
       /*seqused_k=*/nullptr,
@@ -223,12 +232,18 @@ ffi::Error FlashAttentionHopperF16FwdImpl(
   params.tile_count_semaphore = tile_count_semaphore.typed_data();
 
   const int head_dim = query.dimensions()[3];
-  if (head_dim == 128) {
+  if (head_dim == 64) {
+    run_mha_fwd_<cutlass::half_t, 64>(params, stream);
+  }
+  else if (head_dim == 128) {
     run_mha_fwd_<cutlass::half_t, 128>(params, stream);
+  }
+  else if (head_dim == 256) {
+    run_mha_fwd_<cutlass::half_t, 256>(params, stream);
   } else {
     return ffi::Error(
         ffi::ErrorCode::kInvalidArgument,
-        "Only a head_dim of 128 is supported right now.");
+        "Only head_dims of 64, 128 or 256 are supported right now.");
   }
 
   return ffi::Error::Success();

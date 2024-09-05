@@ -45,9 +45,20 @@ export PYTHONPATH=$PYTHONPATH:$(pwd)
 
 
 ### 3. Usage
-Simply import the python library
+Use the convenient wrapper functions defined in `python/flash_attention.py`.
+
+For example, to run the forward pass:
+
 ```
-import flash_attn_jax_lib
+from flash_attention import flash_attention_hopper_fwd
+
+k1, k2, k3 = jax.random.split(jax.random.key(0), 3)
+query = jax.random.normal(k1, (2, 1024, 32, 128), dtype=jnp.float16)
+key = jax.random.normal(k2, (2, 1024, 32, 128), dtype=jnp.float16)
+value = jax.random.normal(k3, (2, 1024, 32, 128), dtype=jnp.float16)
+
+out, *_ = flash_attention_hopper_fwd(query, key, value, softmax_scale=0.2, causal=True)
+
 ```
 
 To run the tests:
@@ -61,7 +72,3 @@ pytest python/test.py
 - Support backwards pass.
 - Support more datatypes: bfloat16, and float8 when it's released.
 - Support more head_dim sizes.
-- Support variables sequence lengths.
-- Relax conditions on the sequence length sizes.
-
-
