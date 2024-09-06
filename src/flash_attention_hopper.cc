@@ -51,10 +51,10 @@ std::vector<int64_t> GetRowMajorStrides(ffi::Span<const int64_t> dimensions) {
 */
 void set_params_fprop(
     Flash_fwd_params& params,
-    ffi::Buffer<ffi::DataType::F16> query,
-    ffi::Buffer<ffi::DataType::F16> key,
-    ffi::Buffer<ffi::DataType::F16> value,
-    ffi::Result<ffi::Buffer<ffi::DataType::F16>> out,
+    ffi::BufferR4<ffi::DataType::F16> query,
+    ffi::BufferR4<ffi::DataType::F16> key,
+    ffi::BufferR4<ffi::DataType::F16> value,
+    ffi::Result<ffi::BufferR4<ffi::DataType::F16>> out,
     const size_t seqlen_q,
     const size_t seqlen_k,
     const size_t seqlen_q_rounded,
@@ -183,25 +183,19 @@ void set_params_fprop(
 
 ffi::Error FlashAttentionHopperF16FwdImpl(
     cudaStream_t stream,
-    ffi::Buffer<ffi::DataType::F16> query,
-    ffi::Buffer<ffi::DataType::F16> key,
-    ffi::Buffer<ffi::DataType::F16> value,
-    ffi::Buffer<ffi::DataType::S32> tile_count_semaphore,
+    ffi::BufferR4<ffi::DataType::F16> query,
+    ffi::BufferR4<ffi::DataType::F16> key,
+    ffi::BufferR4<ffi::DataType::F16> value,
+    ffi::BufferR1<ffi::DataType::S32> tile_count_semaphore,
     float softmax_scale,
     bool is_causal,
-    ffi::Result<ffi::Buffer<ffi::DataType::F16>> res,
-    ffi::Result<ffi::Buffer<ffi::DataType::F32>> softmax_lse) {
-  if (query.dimensions().size() != 4 || key.dimensions().size() != 4 ||
-      value.dimensions().size() != 4) {
-    return ffi::Error(
-        ffi::ErrorCode::kInvalidArgument, "query/key/value must be 4-dim.");
-  }
+    ffi::Result<ffi::BufferR4<ffi::DataType::F16>> res,
+    ffi::Result<ffi::BufferR3<ffi::DataType::F32>> softmax_lse) {
 
-  if (tile_count_semaphore.dimensions().size() != 1 &&
-      tile_count_semaphore.dimensions()[0] != 1) {
+  if (tile_count_semaphore.dimensions().size() != 1) {
     return ffi::Error(
         ffi::ErrorCode::kInvalidArgument,
-        "tile_count_semaphore must be 1-dim and hold a single int32 value.");
+        "tile_count_semaphore must hold a single int32 value, or be uninitialized.");
   }
 
   const int seqlen_q = query.dimensions()[1];
@@ -255,12 +249,12 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
     FlashAttentionHopperF16FwdImpl,
     ffi::Ffi::Bind()
         .Ctx<ffi::PlatformStream<cudaStream_t>>()
-        .Arg<ffi::Buffer<ffi::DataType::F16>>() // query
-        .Arg<ffi::Buffer<ffi::DataType::F16>>() // key
-        .Arg<ffi::Buffer<ffi::DataType::F16>>() // value
-        .Arg<ffi::Buffer<ffi::DataType::S32>>() // tile_count_semaphore
+        .Arg<ffi::BufferR4<ffi::DataType::F16>>() // query
+        .Arg<ffi::BufferR4<ffi::DataType::F16>>() // key
+        .Arg<ffi::BufferR4<ffi::DataType::F16>>() // value
+        .Arg<ffi::BufferR1<ffi::DataType::S32>>() // tile_count_semaphore
         .Attr<float>("softmax_scale")
         .Attr<bool>("is_causal")
-        .Ret<ffi::Buffer<ffi::DataType::F16>>() // res
-        .Ret<ffi::Buffer<ffi::DataType::F32>>() // softmax_lse
+        .Ret<ffi::BufferR4<ffi::DataType::F16>>() // res
+        .Ret<ffi::BufferR3<ffi::DataType::F32>>() // softmax_lse
 );
