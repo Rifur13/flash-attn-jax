@@ -22,7 +22,7 @@ include(FetchContent)
 FetchContent_Declare(
   cutlass
   GIT_REPOSITORY https://github.com/NVIDIA/cutlass.git
-  GIT_TAG         v3.5.0
+  GIT_TAG         v3.5.1
 )
 
 FetchContent_Declare(
@@ -76,7 +76,7 @@ target_compile_options(flash-attn PUBLIC $<$<COMPILE_LANGUAGE:CUDA>:
                        --ptxas-options=-v  # printing out number of registers
                        --ptxas-options=--verbose,--register-usage-level=10,--warn-on-local-memory-usage  # printing out number of registers
                        -lineinfo
-                       -DCUTLASS_DEBUG_TRACE_LEVEL=1  # Can toggle for debugging
+                       -DCUTLASS_DEBUG_TRACE_LEVEL=0  # Can toggle for debugging
                        -DNDEBUG  # Important, otherwise performance is severely impacted
                        >)
 
