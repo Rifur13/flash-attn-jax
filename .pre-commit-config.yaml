@@ -29,3 +29,4 @@ repos:
   rev: v0.6.2
   hooks:
   - id: ruff
+    args: ["--line-length=80"]

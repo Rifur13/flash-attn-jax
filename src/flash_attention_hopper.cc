@@ -24,13 +24,11 @@ limitations under the License.
 #include <type_traits>
 #include <utility>
 #include "cuda_runtime.h"
-#include <iostream>
 
-#include "stdio.h"
 #include <cuda_bf16.h>
 #include <cuda_fp16.h>
 #include <iostream>
-
+#include "stdio.h"
 
 #include "flash.h"
 #include "xla/ffi/api/c_api.h"
@@ -38,14 +36,15 @@ limitations under the License.
 
 namespace ffi = xla::ffi;
 
-#define CHECK_SHAPE(x, ...) { \
-    const std::vector<int64_t> expected_shape = {__VA_ARGS__}; \
+#define CHECK_SHAPE(x, ...)                                              \
+  {                                                                      \
+    const std::vector<int64_t> expected_shape = {__VA_ARGS__};           \
     if (!(x.dimensions() == ffi::Span<const int64_t>(expected_shape))) { \
-        return ffi::Error( \
-            ffi::ErrorCode::kInvalidArgument, \
-            #x " must have shape (" #__VA_ARGS__ ")"); \
-    } \
-}
+      return ffi::Error(                                                 \
+          ffi::ErrorCode::kInvalidArgument,                              \
+          #x " must have shape (" #__VA_ARGS__ ")");                     \
+    }                                                                    \
+  }
 
 // TODO(pobudzey): replace with std::partial_sum
 std::vector<int64_t> GetRowMajorStrides(ffi::Span<const int64_t> dimensions) {
@@ -95,8 +94,7 @@ void set_params_fprop(
     int window_size_left,
     int window_size_right,
     bool seqlenq_ngroups_swapped = false,
-    bool unpadded_lse = false
-) {
+    bool unpadded_lse = false) {
   // Reset the parameters
   params = {};
 
@@ -104,8 +102,8 @@ void set_params_fprop(
   params.is_e4m3 = false;
 
   // Set the pointers and strides.
-  params.q_ptr = query_ptr,
-  params.k_ptr = key_ptr,
+  params.q_ptr = query_ptr;
+  params.k_ptr = key_ptr;
   params.v_ptr = value_ptr;
   params.o_ptr = out_ptr;
 
@@ -191,15 +189,12 @@ void set_params_fprop(
   params.unpadded_lse = unpadded_lse;
 }
 
-
-ffi::Error run_mha_fwd(Flash_fwd_params &params, cudaStream_t stream) {
+ffi::Error run_mha_fwd(Flash_fwd_params& params, cudaStream_t stream) {
   if (params.d == 64) {
     run_mha_fwd_<cutlass::half_t, 64>(params, stream);
-  }
-  else if (params.d == 128) {
+  } else if (params.d == 128) {
     run_mha_fwd_<cutlass::half_t, 128>(params, stream);
-  }
-  else if (params.d == 256) {
+  } else if (params.d == 256) {
     run_mha_fwd_<cutlass::half_t, 256>(params, stream);
   } else {
     return ffi::Error(
@@ -220,7 +215,6 @@ ffi::Error FlashAttentionHopperF16FwdImpl(
     bool is_causal,
     ffi::Result<ffi::BufferR4<ffi::DataType::F16>> res,
     ffi::Result<ffi::BufferR3<ffi::DataType::F32>> softmax_lse) {
-
   CHECK_SHAPE(tile_count_semaphore, 1);
 
   const int64_t batch_size = query.dimensions()[0];
@@ -245,9 +239,12 @@ ffi::Error FlashAttentionHopperF16FwdImpl(
   set_params_fprop(
       params,
       batch_size,
-      seqlen_q, seqlen_k,
-      seqlen_q_rounded, seqlen_k_rounded,
-      num_heads, num_heads_k,
+      seqlen_q,
+      seqlen_k,
+      seqlen_q_rounded,
+      seqlen_k_rounded,
+      num_heads,
+      num_heads_k,
       head_dim,
       /*head_size_rounded=*/head_dim,
       query_strides,
@@ -261,7 +258,7 @@ ffi::Error FlashAttentionHopperF16FwdImpl(
       /*cu_seqlens_q_d=*/nullptr,
       /*cu_seqlens_k_d=*/nullptr,
       /*seqused_k=*/nullptr,
-      /*p_d*/nullptr,
+      /*p_d*/ nullptr,
       softmax_lse->untyped_data(),
       /*p_dropout=*/0.f,
       softmax_scale,
@@ -282,25 +279,30 @@ ffi::Error FlashAttentionHopperF16VarlenFwdImpl(
     const int max_seqlen_q,
     const int max_seqlen_k,
     int window_size_left,
-    int window_size_right,        
+    int window_size_right,
     const float softmax_scale,
     bool causal,
     ffi::Result<ffi::BufferR3<ffi::DataType::F16>> res,
     ffi::Result<ffi::BufferR2<ffi::DataType::F32>> softmax_lse) {
-
   const int batch_size = cu_seqlens_q.element_count() - 1;
 
-  const int total_q = query.dimensions()[0];  
+  const int total_q = query.dimensions()[0];
   const int num_heads = query.dimensions()[1];
   const int head_size_og = query.dimensions()[2];
 
   const int total_k = key.dimensions()[0];
   const int num_heads_k = key.dimensions()[1];
 
-  if (causal) { window_size_right = 0; }
+  if (causal) {
+    window_size_right = 0;
+  }
 
-  if (window_size_left >= max_seqlen_k) { window_size_left = -1; }
-  if (window_size_right >= max_seqlen_k) { window_size_right = -1; }
+  if (window_size_left >= max_seqlen_k) {
+    window_size_left = -1;
+  }
+  if (window_size_right >= max_seqlen_k) {
+    window_size_right = -1;
+  }
 
   CHECK_SHAPE(query, total_q, num_heads, head_size_og);
   CHECK_SHAPE(key, total_k, num_heads_k, head_size_og);
@@ -320,39 +322,42 @@ ffi::Error FlashAttentionHopperF16VarlenFwdImpl(
   auto out_strides = GetRowMajorStrides(res->dimensions());
 
   Flash_fwd_params params;
-  set_params_fprop(params,
-                    batch_size,
-                    max_seqlen_q, max_seqlen_k,
-                    seqlen_q_rounded, seqlen_k_rounded,
-                    num_heads, num_heads_k,
-                    /*head_size=*/ head_size_og, 
-                    /*head_size_rounded=*/ head_size_og,
-                    query_strides,
-                    key_strides,
-                    value_strides,
-                    out_strides,
-                    /*query_ptr=*/query.untyped_data(),
-                    /*key_ptr=*/key.untyped_data(),
-                    /*value_ptr=*/value.untyped_data(),
-                    /*out_ptr=*/res->untyped_data(),
-                    /* cu_seqlens_q */ cu_seqlens_q.untyped_data(),
-                    /* cu_seqlens_k */ cu_seqlens_k.untyped_data(),
-                    /*seqused_k=*/nullptr,
-                    /*p_d=*/nullptr,
-                    softmax_lse->untyped_data(),
-                    /*p_dropout=*/0.f,
-                    softmax_scale,
-                    window_size_left,
-                    window_size_right,
-                    /*seqlenq_ngroups_swapped=*/false,
-                    /*unpadded_lse=*/true);
+  set_params_fprop(
+      params,
+      batch_size,
+      max_seqlen_q,
+      max_seqlen_k,
+      seqlen_q_rounded,
+      seqlen_k_rounded,
+      num_heads,
+      num_heads_k,
+      /*head_size=*/head_size_og,
+      /*head_size_rounded=*/head_size_og,
+      query_strides,
+      key_strides,
+      value_strides,
+      out_strides,
+      /*query_ptr=*/query.untyped_data(),
+      /*key_ptr=*/key.untyped_data(),
+      /*value_ptr=*/value.untyped_data(),
+      /*out_ptr=*/res->untyped_data(),
+      /* cu_seqlens_q */ cu_seqlens_q.untyped_data(),
+      /* cu_seqlens_k */ cu_seqlens_k.untyped_data(),
+      /*seqused_k=*/nullptr,
+      /*p_d=*/nullptr,
+      softmax_lse->untyped_data(),
+      /*p_dropout=*/0.f,
+      softmax_scale,
+      window_size_left,
+      window_size_right,
+      /*seqlenq_ngroups_swapped=*/false,
+      /*unpadded_lse=*/true);
 
   params.total_q = total_q;
   params.total_k = total_k;
 
   return run_mha_fwd(params, stream);
 }
-
 
 XLA_FFI_DEFINE_HANDLER_SYMBOL(
     FlashAttentionHopperF16Fwd,
@@ -368,7 +373,6 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Ret<ffi::BufferR4<ffi::DataType::F16>>() // res
         .Ret<ffi::BufferR3<ffi::DataType::F32>>() // softmax_lse
 );
-
 
 XLA_FFI_DEFINE_HANDLER_SYMBOL(
     FlashAttentionHopperF16VarlenFwd,

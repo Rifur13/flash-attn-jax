@@ -7,17 +7,28 @@ import jax.nn as nn
 from einops import rearrange
 
 from jax._src.typing import DTypeLike
-from flash_attention import flash_attention_hopper_fwd, flash_attention_hopper_varlen_fwd
-from test_utils import generate_random_padding_mask, unpad_input, pad_input, generate_qkv
+from flash_attention import (
+    flash_attention_hopper_fwd,
+    flash_attention_hopper_varlen_fwd,
+)
+from test_utils import (
+    generate_random_padding_mask,
+    unpad_input,
+    pad_input,
+    generate_qkv,
+)
 
 ABS_TOL = 5e-3
 REL_TOL = 1e-1
+
 
 def test_pad_input():
     batch_size = 9
     seq_len = 10
 
-    x = jax.random.normal(jax.random.key(0), (batch_size, seq_len, 32, 128), jnp.float16)
+    x = jax.random.normal(
+        jax.random.key(0), (batch_size, seq_len, 32, 128), jnp.float16
+    )
     x_mask = generate_random_padding_mask(batch_size, seq_len)
 
     x_unpad, indices, cu_seqlens, max_seqlen = unpad_input(x, x_mask)
@@ -26,6 +37,7 @@ def test_pad_input():
     x_masked = x * jnp.expand_dims(x_mask, (2, 3))
 
     np.testing.assert_allclose(x_masked, out)
+
 
 @pytest.mark.parametrize("dtype", [jnp.float16])
 @pytest.mark.parametrize("head_dim", [64, 128, 256])
@@ -42,7 +54,14 @@ def test_pad_input():
         (2048, 2048),
     ],
 )
-def test_fwd(seqlen_q: int, seqlen_k: int, head_dim: int, mha_type: str, causal: bool, dtype: DTypeLike):
+def test_fwd(
+    seqlen_q: int,
+    seqlen_k: int,
+    head_dim: int,
+    mha_type: str,
+    causal: bool,
+    dtype: DTypeLike,
+):
     batch_size = 9
     nheads = 6
     nheads_kv = 6 if mha_type == "mha" else (2 if mha_type == "gqa" else 1)
@@ -52,10 +71,13 @@ def test_fwd(seqlen_q: int, seqlen_k: int, head_dim: int, mha_type: str, causal:
     key = jax.random.normal(k2, (batch_size, seqlen_k, nheads_kv, head_dim), dtype)
     value = jax.random.normal(k3, (batch_size, seqlen_k, nheads_kv, head_dim), dtype)
 
-    out, *_ = flash_attention_hopper_fwd(query, key, value, softmax_scale=None, causal=causal)
+    out, *_ = flash_attention_hopper_fwd(
+        query, key, value, softmax_scale=None, causal=causal
+    )
     out_ref = nn.dot_product_attention(query, key, value, scale=None, is_causal=causal)
 
     np.testing.assert_allclose(out, out_ref, atol=ABS_TOL, rtol=REL_TOL)
+
 
 @pytest.mark.parametrize("dtype", [jnp.float16])
 @pytest.mark.parametrize("head_dim", [64, 128, 256])
@@ -72,7 +94,14 @@ def test_fwd(seqlen_q: int, seqlen_k: int, head_dim: int, mha_type: str, causal:
         (2048, 2048),
     ],
 )
-def test_fwd_varlen(seqlen_q: int, seqlen_k: int, head_dim: int, mha_type: str, causal: bool, dtype: DTypeLike):
+def test_fwd_varlen(
+    seqlen_q: int,
+    seqlen_k: int,
+    head_dim: int,
+    mha_type: str,
+    causal: bool,
+    dtype: DTypeLike,
+):
     batch_size = 9
     nheads = 6
     nheads_kv = 6 if mha_type == "mha" else (2 if mha_type == "gqa" else 1)
@@ -107,8 +136,8 @@ def test_fwd_varlen(seqlen_q: int, seqlen_k: int, head_dim: int, mha_type: str, 
         cu_seqlens_k,
         max_seqlen_q,
         max_seqlen_k,
-        window_size_left = -1,
-        window_size_right = -1,
+        window_size_left=-1,
+        window_size_right=-1,
         softmax_scale=None,
         causal=causal,
     )

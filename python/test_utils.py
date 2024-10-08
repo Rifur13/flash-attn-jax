@@ -3,6 +3,7 @@ import jax.numpy as jnp
 from einops import rearrange
 from utils import _check_shape
 
+
 def generate_random_padding_mask(batch_size: int, max_seq_len: int) -> jax.Array:
     """
     Generates a random padding mask for a batch of sequences.
@@ -15,8 +16,12 @@ def generate_random_padding_mask(batch_size: int, max_seq_len: int) -> jax.Array
     A 2D boolean jax.Array of shape (batch_size, max_seq_len) where `True` indicates a valid token and `False` indicates padding.
     """
     key = jax.random.key(0)
-    lengths = jax.random.randint(key, (batch_size, 1), max(1, max_seq_len - 20), max_seq_len + 1)
-    grid = jnp.tile(jnp.arange(max_seq_len), batch_size).reshape((batch_size, max_seq_len))
+    lengths = jax.random.randint(
+        key, (batch_size, 1), max(1, max_seq_len - 20), max_seq_len + 1
+    )
+    grid = jnp.tile(jnp.arange(max_seq_len), batch_size).reshape(
+        (batch_size, max_seq_len)
+    )
     padding_mask = grid < lengths
 
     return padding_mask
@@ -49,6 +54,7 @@ def unpad_input(hidden_states: jax.Array, attention_mask: jax.Array):
         max_seqlen_in_batch,
     )
 
+
 def pad_input(hidden_states, indices, batch_size, seq_len):
     """
     Given a packed input and the indices at which there's a valid token, return the padded input.
@@ -62,13 +68,21 @@ def pad_input(hidden_states, indices, batch_size, seq_len):
     Returns:
         The padded hidden states.
     """
-    output = jnp.zeros((batch_size * seq_len, *hidden_states.shape[1:]), dtype=hidden_states.dtype)
+    output = jnp.zeros(
+        (batch_size * seq_len, *hidden_states.shape[1:]), dtype=hidden_states.dtype
+    )
     output = output.at[indices].set(hidden_states)
 
     return rearrange(output, "(b s) ... -> b s ...", b=batch_size)
 
 
-def generate_qkv(q: jax.Array, k: jax.Array, v: jax.Array, query_padding_mask: jax.Array, key_padding_mask: jax.Array):
+def generate_qkv(
+    q: jax.Array,
+    k: jax.Array,
+    v: jax.Array,
+    query_padding_mask: jax.Array,
+    key_padding_mask: jax.Array,
+):
     batch_size, seqlen_q, _, d = q.shape
     _, seqlen_k, nheads_k, _ = k.shape
 
@@ -94,5 +108,5 @@ def generate_qkv(q: jax.Array, k: jax.Array, v: jax.Array, query_padding_mask: j
         q,
         k,
         v,
-        output_pad_fn
+        output_pad_fn,
     )

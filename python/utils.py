@@ -4,13 +4,21 @@ import collections
 import jax
 from jax._src.typing import DType
 
-def _check_shape(array: jax.Array, expected_shape: Sequence[int], name: str) -> NoReturn:
-  if array.shape != expected_shape:
-    raise ValueError(f"{name} should have shape: {expected_shape}, but got {array.shape}.")
 
-def _check_dtype(array: jax.Array, dtypes: DType | Sequence[DType], name: str) -> NoReturn:
-  if not isinstance(dtypes, collections.abc.Sequence):
-     dtypes = (dtypes, )
+def _check_shape(
+    array: jax.Array, expected_shape: Sequence[int], name: str
+) -> NoReturn:
+    if array.shape != expected_shape:
+        raise ValueError(
+            f"{name} should have shape: {expected_shape}, but got {array.shape}."
+        )
 
-  if all(array.dtype != d for d in dtypes):
-    raise ValueError(f"{name} must be of type {dtypes}, but is {array.dtype}.")
+
+def _check_dtype(
+    array: jax.Array, dtypes: DType | Sequence[DType], name: str
+) -> NoReturn:
+    if not isinstance(dtypes, collections.abc.Sequence):
+        dtypes = (dtypes,)
+
+    if all(array.dtype != d for d in dtypes):
+        raise ValueError(f"{name} must be of type {dtypes}, but is {array.dtype}.")
