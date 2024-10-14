@@ -22,3 +22,21 @@ def _check_dtype(
 
     if all(array.dtype != d for d in dtypes):
         raise ValueError(f"{name} must be of type {dtypes}, but is {array.dtype}.")
+
+
+def _check_is_multiple(x: int, y: int, name: str) -> NoReturn:
+    if x % y != 0:
+        raise ValueError(f"{name} must be divisible by {y}")
+
+
+def round_multiple(x: int, m: int) -> int:
+    """Rounds x to the nearest multiple of m.
+
+    Args:
+      x: The number to round.
+      m: The multiple to round to.
+
+    Returns:
+      The rounded number.
+    """
+    return (x + m - 1) // m * m

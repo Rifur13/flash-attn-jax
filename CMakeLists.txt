@@ -28,7 +28,6 @@ FetchContent_Declare(
 FetchContent_Declare(
   dao-ai-lab
   GIT_REPOSITORY https://github.com/Dao-AILab/flash-attention.git
-  GIT_TAG        v2.6.3
 )
 
 FetchContent_GetProperties(cutlass)
@@ -37,7 +36,15 @@ if(NOT cutlass_POPULATED)
   FetchContent_Populate(cutlass)
 endif()
 
-FetchContent_MakeAvailable(dao-ai-lab)
+set(dao-ai-lab_SOURCE_DIR ${CMAKE_CURRENT_BINARY_DIR}/dao-ai-lab-src)
+# Manually clone and checkout
+execute_process(
+  COMMAND git clone https://github.com/Dao-AILab/flash-attention.git ${dao-ai-lab_SOURCE_DIR}
+)
+execute_process(
+  COMMAND git checkout bedf8774677315c5eb7e640eca6d7aa15e87775a
+  WORKING_DIRECTORY ${dao-ai-lab_SOURCE_DIR}
+)
 ####################
 
 # Find nanobind through pip
@@ -55,6 +62,7 @@ target_sources(
   ${dao-ai-lab_SOURCE_DIR}/hopper/flash_fwd_hdim64_fp16_sm90.cu
   ${dao-ai-lab_SOURCE_DIR}/hopper/flash_fwd_hdim128_fp16_sm90.cu
   ${dao-ai-lab_SOURCE_DIR}/hopper/flash_fwd_hdim256_fp16_sm90.cu
+  ${dao-ai-lab_SOURCE_DIR}/hopper/flash_bwd_hdim64_fp16_sm90.cu
   ${dao-ai-lab_SOURCE_DIR}/hopper/flash_bwd_hdim128_fp16_sm90.cu
 )
 

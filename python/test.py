@@ -2,24 +2,18 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
-import jax.nn as nn
+import functools
 
-from einops import rearrange
+from flash_attention_reference import attention_ref
 
 from jax._src.typing import DTypeLike
-from flash_attention import (
-    flash_attention_hopper_fwd,
-    flash_attention_hopper_varlen_fwd,
-)
+from flash_attention import flash_attention_hopper_varlen_fwd, flash_attention_hopper
 from test_utils import (
     generate_random_padding_mask,
     unpad_input,
     pad_input,
     generate_qkv,
 )
-
-ABS_TOL = 5e-3
-REL_TOL = 1e-1
 
 
 def test_pad_input():
@@ -71,12 +65,11 @@ def test_fwd(
     key = jax.random.normal(k2, (batch_size, seqlen_k, nheads_kv, head_dim), dtype)
     value = jax.random.normal(k3, (batch_size, seqlen_k, nheads_kv, head_dim), dtype)
 
-    out, *_ = flash_attention_hopper_fwd(
-        query, key, value, softmax_scale=None, causal=causal
-    )
-    out_ref = nn.dot_product_attention(query, key, value, scale=None, is_causal=causal)
+    impl = functools.partial(flash_attention_hopper, softmax_scale=1.0, causal=causal)
+    out = impl(query, key, value)
+    out_ref = attention_ref(query, key, value, softmax_scale=1.0, causal=causal)
 
-    np.testing.assert_allclose(out, out_ref, atol=ABS_TOL, rtol=REL_TOL)
+    np.testing.assert_allclose(out, out_ref, atol=5e-3, rtol=1e-1)
 
 
 @pytest.mark.parametrize("dtype", [jnp.float16])
@@ -143,9 +136,63 @@ def test_fwd_varlen(
     )
 
     out = output_pad_fn(out_unpad)
-    out_ref = nn.dot_product_attention(q, k, v, scale=None, is_causal=causal)
+    out_ref = attention_ref(
+        q, k, v, query_padding_mask, key_padding_mask, softmax_scale=None, causal=causal
+    )
 
-    q_zero_masking = jnp.logical_not(rearrange(query_padding_mask, "b s -> b s 1 1"))
-    out_ref_masked = jnp.where(q_zero_masking, 0.0, out_ref)
+    np.testing.assert_allclose(out, out_ref, atol=5e-3, rtol=1e-1)
 
-    np.testing.assert_allclose(out, out_ref_masked, atol=ABS_TOL, rtol=REL_TOL)
+
+@pytest.mark.skip
+@pytest.mark.parametrize("dtype", [jnp.float16])
+@pytest.mark.parametrize("head_dim", [64, 128])
+@pytest.mark.parametrize("mha_type", ["mha"])
+@pytest.mark.parametrize("causal", [True, False])
+@pytest.mark.parametrize(
+    "seqlen_q,seqlen_k",
+    [
+        (128, 128),
+        (256, 256),
+        (1024, 1024),
+        (2048, 2048),
+    ],
+)
+def test_bwd(
+    seqlen_q: int,
+    seqlen_k: int,
+    head_dim: int,
+    mha_type: str,
+    causal: bool,
+    dtype: DTypeLike,
+):
+    batch_size = 9
+    nheads = 6
+    nheads_kv = 6 if mha_type == "mha" else (2 if mha_type == "gqa" else 1)
+
+    k1, k2, k3 = jax.random.split(jax.random.key(0), 3)
+    query = jax.random.normal(k1, (batch_size, seqlen_q, nheads, head_dim), dtype)
+    key = jax.random.normal(k2, (batch_size, seqlen_k, nheads_kv, head_dim), dtype)
+    value = jax.random.normal(k3, (batch_size, seqlen_k, nheads_kv, head_dim), dtype)
+
+    def f(q, k, v):
+        impl = functools.partial(
+            flash_attention_hopper, softmax_scale=None, causal=causal
+        )
+        return impl(q, k, v).sum()
+
+    def f_ref(q, k, v):
+        impl = functools.partial(
+            attention_ref,
+            query_padding_mask=None,
+            key_padding_mask=None,
+            softmax_scale=None,
+            causal=causal,
+        )
+        return impl(q, k, v).sum()
+
+    dq, dk, dv = jax.grad(f, argnums=(0, 1, 2))(query, key, value)
+    dq_ref, dk_ref, dv_ref = jax.grad(f_ref, argnums=(0, 1, 2))(query, key, value)
+
+    np.testing.assert_allclose(dq, dq_ref, atol=1e-1)
+    np.testing.assert_allclose(dk, dk_ref, atol=1e-1)
+    np.testing.assert_allclose(dv, dv_ref, atol=1e-1)
