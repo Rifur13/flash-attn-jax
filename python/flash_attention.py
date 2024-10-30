@@ -7,7 +7,13 @@ import numpy as np
 from jax.typing import ArrayLike
 import functools
 
-from utils import _check_dtype, _check_shape, _check_is_multiple, round_multiple
+from utils import (
+    check_dtype,
+    check_shape,
+    check_is_multiple,
+    check_compute_capability,
+    round_multiple,
+)
 
 import flash_attn_jax_lib
 
@@ -66,6 +72,8 @@ def flash_attention_hopper(
     causal: bool = False,
     deterministic: bool = True,
 ):
+    check_compute_capability("9.0")
+
     out, _ = _flash_attention_hopper_fwd(
         query,
         key,
@@ -92,7 +100,6 @@ def _flash_attention_hopper_fwd(
 ):
     del window_size_left, window_size_right, deterministic
 
-    # (TODO pobudzey): check for sm90
     if not (query.ndim == 4 and key.ndim == 4 and value.ndim == 4):
         raise ValueError(
             f"query/key/value should be 4-dim, but are {query.ndim}/{key.ndim}/{value.ndim}"
@@ -104,12 +111,12 @@ def _flash_attention_hopper_fwd(
     if softmax_scale is None:
         softmax_scale = 1 / math.sqrt(head_dim)
 
-    _check_dtype(query, [jnp.float16], "query")
-    _check_dtype(key, query.dtype, "key")
-    _check_dtype(value, query.dtype, "value")
+    check_dtype(query, [jnp.float16], "query")
+    check_dtype(key, query.dtype, "key")
+    check_dtype(value, query.dtype, "value")
 
-    _check_shape(key, (batch_size, seq_len_kv, num_heads_kv, head_dim), "key")
-    _check_shape(value, (batch_size, seq_len_kv, num_heads_kv, head_dim), "value")
+    check_shape(key, (batch_size, seq_len_kv, num_heads_kv, head_dim), "key")
+    check_shape(value, (batch_size, seq_len_kv, num_heads_kv, head_dim), "value")
 
     if seq_len_q != seq_len_kv:
         raise ValueError(
@@ -164,11 +171,11 @@ def _flash_attention_hopper_bwd(
 ):
     query, key, value, out, softmax_lse = res
 
-    _check_dtype(query, [jnp.float16], "query")
-    _check_dtype(key, query.dtype, "key")
-    _check_dtype(value, query.dtype, "value")
-    _check_dtype(dout, query.dtype, "dout")
-    _check_dtype(out, query.dtype, "out")
+    check_dtype(query, [jnp.float16], "query")
+    check_dtype(key, query.dtype, "key")
+    check_dtype(value, query.dtype, "value")
+    check_dtype(dout, query.dtype, "dout")
+    check_dtype(out, query.dtype, "out")
 
     if not (
         query.ndim == 4
@@ -204,13 +211,13 @@ def _flash_attention_hopper_bwd(
             f"key/value heads, but got {num_heads_q} vs {num_heads_kv}"
         )
 
-    _check_is_multiple(seq_len_q, 128, "seq_len_q")
-    _check_is_multiple(seq_len_kv, 128, "seq_len_kv")
+    check_is_multiple(seq_len_q, 128, "seq_len_q")
+    check_is_multiple(seq_len_kv, 128, "seq_len_kv")
 
-    _check_shape(dout, (batch_size, seq_len_q, num_heads_q, head_dim), "dout")
-    _check_shape(out, (batch_size, seq_len_q, num_heads_q, head_dim), "out")
-    _check_shape(key, (batch_size, seq_len_kv, num_heads_kv, head_dim), "key")
-    _check_shape(value, (batch_size, seq_len_kv, num_heads_kv, head_dim), "value")
+    check_shape(dout, (batch_size, seq_len_q, num_heads_q, head_dim), "dout")
+    check_shape(out, (batch_size, seq_len_q, num_heads_q, head_dim), "out")
+    check_shape(key, (batch_size, seq_len_kv, num_heads_kv, head_dim), "key")
+    check_shape(value, (batch_size, seq_len_kv, num_heads_kv, head_dim), "value")
 
     dq_semaphore = jnp.zeros(
         ((seq_len_q + k_block_m - 1) // 64, batch_size, num_heads_q), jnp.int32
@@ -313,6 +320,8 @@ def flash_attention_hopper_varlen(
     causal: bool = False,
     deterministic: bool = True,
 ):
+    check_compute_capability("9.0")
+
     out, res = _flash_attention_hopper_varlen_fwd(
         query,
         key,
@@ -348,7 +357,6 @@ def _flash_attention_hopper_varlen_fwd(
     deterministic: bool,
 ):
     del deterministic
-    # (TODO pobudzey): check for sm90
 
     if not (query.ndim == 3 and key.ndim == 3 and value.ndim == 3):
         raise ValueError(
@@ -362,12 +370,12 @@ def _flash_attention_hopper_varlen_fwd(
     if softmax_scale is None:
         softmax_scale = 1 / math.sqrt(head_dim)
 
-    _check_dtype(query, [jnp.float16], "query")
-    _check_dtype(key, query.dtype, "key")
-    _check_dtype(value, query.dtype, "value")
+    check_dtype(query, [jnp.float16], "query")
+    check_dtype(key, query.dtype, "key")
+    check_dtype(value, query.dtype, "value")
 
-    _check_dtype(cu_seqlens_q, jnp.int32, "cu_seqlens_q")
-    _check_dtype(cu_seqlens_k, jnp.int32, "cu_seqlens_k")
+    check_dtype(cu_seqlens_q, jnp.int32, "cu_seqlens_q")
+    check_dtype(cu_seqlens_k, jnp.int32, "cu_seqlens_k")
 
     if head_dim not in [64, 128, 256]:
         raise ValueError(f"head_dim must be one of [64, 128, 256], but got {head_dim}.")
@@ -378,12 +386,12 @@ def _flash_attention_hopper_varlen_fwd(
             f"key/value heads, but got {num_heads} vs {num_heads_k}"
         )
 
-    _check_shape(query, (total_q, num_heads, head_dim), "query")
-    _check_shape(key, (total_k, num_heads_k, head_dim), "key")
-    _check_shape(value, (total_k, num_heads_k, head_dim), "value")
+    check_shape(query, (total_q, num_heads, head_dim), "query")
+    check_shape(key, (total_k, num_heads_k, head_dim), "key")
+    check_shape(value, (total_k, num_heads_k, head_dim), "value")
 
-    _check_shape(cu_seqlens_q, (batch_size + 1,), "cu_seqlens_q")
-    _check_shape(cu_seqlens_k, (batch_size + 1,), "cu_seqlens_k")
+    check_shape(cu_seqlens_q, (batch_size + 1,), "cu_seqlens_q")
+    check_shape(cu_seqlens_k, (batch_size + 1,), "cu_seqlens_k")
 
     out_type = [
         jax.ShapeDtypeStruct(query.shape, query.dtype),  # out
@@ -421,8 +429,6 @@ def _flash_attention_hopper_varlen_bwd(
     res,
     dout: jax.Array,
 ):
-    # (TODO pobudzey): check for sm90
-
     query, key, value, cu_seqlens_q, cu_seqlens_k, out, softmax_lse = res
 
     if not (
@@ -446,14 +452,14 @@ def _flash_attention_hopper_varlen_bwd(
     if softmax_scale is None:
         softmax_scale = 1 / math.sqrt(head_dim)
 
-    _check_dtype(query, [jnp.float16], "query")
-    _check_dtype(key, query.dtype, "key")
-    _check_dtype(value, query.dtype, "value")
-    _check_dtype(dout, query.dtype, "dout")
-    _check_dtype(out, query.dtype, "out")
+    check_dtype(query, [jnp.float16], "query")
+    check_dtype(key, query.dtype, "key")
+    check_dtype(value, query.dtype, "value")
+    check_dtype(dout, query.dtype, "dout")
+    check_dtype(out, query.dtype, "out")
 
-    _check_dtype(cu_seqlens_q, jnp.int32, "cu_seqlens_q")
-    _check_dtype(cu_seqlens_k, jnp.int32, "cu_seqlens_k")
+    check_dtype(cu_seqlens_q, jnp.int32, "cu_seqlens_q")
+    check_dtype(cu_seqlens_k, jnp.int32, "cu_seqlens_k")
 
     if head_dim not in [64, 128]:
         raise ValueError(f"head_dim must be one of [64, 128], but got {head_dim}.")
@@ -463,12 +469,12 @@ def _flash_attention_hopper_varlen_bwd(
             f"Only multi-headed attention is supported. Query heads must equal key/value heads, but got {num_heads} vs {num_heads_k}."
         )
 
-    _check_shape(query, (total_q, num_heads, head_dim), "query")
-    _check_shape(key, (total_k, num_heads_k, head_dim), "key")
-    _check_shape(value, (total_k, num_heads_k, head_dim), "value")
+    check_shape(query, (total_q, num_heads, head_dim), "query")
+    check_shape(key, (total_k, num_heads_k, head_dim), "key")
+    check_shape(value, (total_k, num_heads_k, head_dim), "value")
 
-    _check_shape(cu_seqlens_q, (batch_size + 1,), "cu_seqlens_q")
-    _check_shape(cu_seqlens_k, (batch_size + 1,), "cu_seqlens_k")
+    check_shape(cu_seqlens_q, (batch_size + 1,), "cu_seqlens_q")
+    check_shape(cu_seqlens_k, (batch_size + 1,), "cu_seqlens_k")
 
     dq_semaphore = jnp.zeros(
         ((max_seqlen_q + k_block_m - 1) // k_block_m, batch_size, num_heads), jnp.int32

@@ -1,7 +1,7 @@
 import jax
 import jax.numpy as jnp
 from einops import rearrange
-from utils import _check_shape
+from utils import check_shape
 
 
 def generate_random_padding_mask(batch_size: int, max_seq_len: int) -> jax.Array:
@@ -86,8 +86,8 @@ def generate_qkv(
     batch_size, seqlen_q, _, head_dim = q.shape
     _, seqlen_k, numheads_k, _ = k.shape
 
-    _check_shape(k, (batch_size, seqlen_k, numheads_k, head_dim), "key")
-    _check_shape(v, (batch_size, seqlen_k, numheads_k, head_dim), "value")
+    check_shape(k, (batch_size, seqlen_k, numheads_k, head_dim), "key")
+    check_shape(v, (batch_size, seqlen_k, numheads_k, head_dim), "value")
 
     q_unpad, indices_q, cu_seqlens_q, max_seqlen_q = unpad_input(q, query_padding_mask)
 
