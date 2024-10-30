@@ -29,4 +29,8 @@ NB_MODULE(flash_attn_jax_lib, m) {
   m.def("flash_attention_hopper_f16_bwd", []() {
     return EncapsulateFfiCall(FlashAttentionHopperF16Bwd);
   });
+
+  m.def("flash_attention_hopper_f16_varlen_bwd", []() {
+    return EncapsulateFfiCall(FlashAttentionHopperF16VarlenBwd);
+  });
 }

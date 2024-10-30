@@ -83,19 +83,24 @@ def generate_qkv(
     query_padding_mask: jax.Array,
     key_padding_mask: jax.Array,
 ):
-    batch_size, seqlen_q, _, d = q.shape
-    _, seqlen_k, nheads_k, _ = k.shape
+    batch_size, seqlen_q, _, head_dim = q.shape
+    _, seqlen_k, numheads_k, _ = k.shape
 
-    _check_shape(k, (batch_size, seqlen_k, nheads_k, d), "key")
-    _check_shape(v, (batch_size, seqlen_k, nheads_k, d), "value")
+    _check_shape(k, (batch_size, seqlen_k, numheads_k, head_dim), "key")
+    _check_shape(v, (batch_size, seqlen_k, numheads_k, head_dim), "value")
 
     q_unpad, indices_q, cu_seqlens_q, max_seqlen_q = unpad_input(q, query_padding_mask)
 
     def output_pad_fn(output_unpad):
         return pad_input(output_unpad, indices_q, batch_size, seqlen_q)
 
-    k_unpad, _, cu_seqlens_k, max_seqlen_k = unpad_input(k, key_padding_mask)
+    k_unpad, indices_k, cu_seqlens_k, max_seqlen_k = unpad_input(k, key_padding_mask)
     v_unpad, _, _, _ = unpad_input(v, key_padding_mask)
+
+    dq_pad_fn = output_pad_fn
+
+    def dk_pad_fn(dk_unpad):
+        return pad_input(dk_unpad, indices_k, batch_size, seqlen_k)
 
     return (
         q_unpad,
@@ -109,4 +114,6 @@ def generate_qkv(
         k,
         v,
         output_pad_fn,
+        dq_pad_fn,
+        dk_pad_fn,
     )

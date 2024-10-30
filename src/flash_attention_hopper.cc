@@ -523,7 +523,6 @@ ffi::Error FlashAttentionHopperF16BwdImpl(
   CHECK_SHAPE(out, batch_size, seqlen_q, num_heads, head_dim);
   CHECK_SHAPE(dout, batch_size, seqlen_q, num_heads, head_dim);
 
-  // CHECK_SHAPE(softmax_d, batch_size, num_heads, seqlen_q_rounded);
   CHECK_SHAPE(softmax_lse_log2, batch_size, num_heads, seqlen_q_rounded);
   CHECK_SHAPE(dq_accum, batch_size, num_heads, seqlen_q_rounded, head_dim);
 
@@ -584,6 +583,113 @@ ffi::Error FlashAttentionHopperF16BwdImpl(
   return run_mha_bwd(params, stream);
 }
 
+ffi::Error FlashAttentionHopperF16VarlenBwdImpl(
+    cudaStream_t stream,
+    ffi::BufferR3<ffi::DataType::F16> dout,
+    ffi::BufferR3<ffi::DataType::F16> query,
+    ffi::BufferR3<ffi::DataType::F16> key,
+    ffi::BufferR3<ffi::DataType::F16> value,
+    ffi::BufferR3<ffi::DataType::F16> out,
+    ffi::BufferR1<ffi::DataType::S32> cu_seqlens_q,
+    ffi::BufferR1<ffi::DataType::S32> cu_seqlens_k,
+    ffi::BufferR2<ffi::DataType::F32> softmax_lse,
+    ffi::BufferR2<ffi::DataType::F32> softmax_lse_log2,
+    ffi::BufferR3<ffi::DataType::F32> dq_accum,
+    ffi::BufferR3<ffi::DataType::S32> dq_semaphore,
+    const int max_seqlen_q,
+    const int max_seqlen_k,
+    int window_size_left,
+    int window_size_right,
+    const float softmax_scale,
+    const bool causal,
+    const bool deterministic,
+    ffi::Result<ffi::BufferR3<ffi::DataType::F16>> dq,
+    ffi::Result<ffi::BufferR3<ffi::DataType::F16>> dk,
+    ffi::Result<ffi::BufferR3<ffi::DataType::F16>> dv,
+    ffi::Result<ffi::BufferR2<ffi::DataType::F32>> softmax_d) {
+  const int batch_size = cu_seqlens_q.element_count() - 1;
+
+  const int total_q = query.dimensions()[0];
+  const int num_heads = query.dimensions()[1];
+  const int head_size = query.dimensions()[2];
+
+  const int total_k = key.dimensions()[0];
+  const int num_heads_k = key.dimensions()[1];
+
+  auto round_multiple = [](int x, int m) { return (x + m - 1) / m * m; };
+  const int kBlockM = head_size <= 64 ? 128 : (head_size < 256 ? 64 : 32);
+  const int seqlen_q_rounded = round_multiple(max_seqlen_q, kBlockM);
+  const int seqlen_k_rounded = round_multiple(max_seqlen_k, 128);
+  int const total_q_padded_rounded =
+      round_multiple(total_q + batch_size * 128, 128);
+
+  CHECK_SHAPE(query, total_q, num_heads, head_size);
+  CHECK_SHAPE(key, total_k, num_heads_k, head_size);
+  CHECK_SHAPE(value, total_k, num_heads_k, head_size);
+  CHECK_SHAPE(out, total_q, num_heads, head_size);
+  CHECK_SHAPE(dout, total_q, num_heads, head_size);
+  CHECK_SHAPE(cu_seqlens_q, batch_size + 1);
+  CHECK_SHAPE(cu_seqlens_k, batch_size + 1);
+
+  if (causal) {
+    window_size_right = 0;
+  }
+
+  // XLA forces a row-major layout on all arrays.
+  auto query_strides = GetRowMajorStrides(query.dimensions());
+  auto key_strides = GetRowMajorStrides(key.dimensions());
+  auto value_strides = GetRowMajorStrides(value.dimensions());
+  auto out_strides = GetRowMajorStrides(out.dimensions());
+  auto dout_strides = GetRowMajorStrides(dout.dimensions());
+
+  Flash_bwd_params params;
+  set_params_dgrad(
+      params,
+      batch_size,
+      max_seqlen_q,
+      max_seqlen_k,
+      seqlen_q_rounded,
+      seqlen_k_rounded,
+      num_heads,
+      num_heads_k,
+      /*head_size=*/head_size,
+      /*head_size_rounded=*/head_size,
+      query_strides,
+      key_strides,
+      value_strides,
+      out_strides,
+      dout_strides,
+      /*q_ptr=*/query.untyped_data(),
+      /*k_ptr=*/key.untyped_data(),
+      /*v_ptr=*/value.untyped_data(),
+      /*out_ptr=*/out.untyped_data(),
+      /*dout_ptr=*/dout.untyped_data(),
+      /*dq_ptr=*/dq->untyped_data(),
+      /*dk_ptr=*/dk->untyped_data(),
+      /*dv_ptr=*/dv->untyped_data(),
+      /*cu_seqlens_q_d=*/cu_seqlens_q.untyped_data(),
+      /*cu_seqlens_k_d=*/cu_seqlens_k.untyped_data(),
+      /*seqused_q=*/nullptr,
+      /*seqused_k=*/nullptr,
+      /*dq_accum_d=*/dq_accum.untyped_data(),
+      /*dk_accum_d=*/nullptr,
+      /*dv_accum_d=*/nullptr,
+      /*softmax_lse_d=*/softmax_lse.untyped_data(),
+      /*dsoftmax_sum_d=*/softmax_d->untyped_data(),
+      /*p_dropout=*/0.f,
+      softmax_scale,
+      window_size_left,
+      window_size_right,
+      deterministic);
+
+  params.total_q = total_q;
+  params.total_k = total_k;
+  params.softmax_lse_log2_ptr = softmax_lse_log2.untyped_data();
+  params.dq_semaphore = dq_semaphore.typed_data();
+
+  return run_mha_bwd(params, stream);
+}
+
 XLA_FFI_DEFINE_HANDLER_SYMBOL(
     FlashAttentionHopperF16Fwd,
     FlashAttentionHopperF16FwdImpl,
@@ -597,26 +703,6 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Attr<bool>("is_causal")
         .Ret<ffi::BufferR4<ffi::DataType::F16>>() // res
         .Ret<ffi::BufferR3<ffi::DataType::F32>>() // softmax_lse
-);
-
-XLA_FFI_DEFINE_HANDLER_SYMBOL(
-    FlashAttentionHopperF16VarlenFwd,
-    FlashAttentionHopperF16VarlenFwdImpl,
-    ffi::Ffi::Bind()
-        .Ctx<ffi::PlatformStream<cudaStream_t>>()
-        .Arg<ffi::BufferR3<ffi::DataType::F16>>() // query
-        .Arg<ffi::BufferR3<ffi::DataType::F16>>() // key
-        .Arg<ffi::BufferR3<ffi::DataType::F16>>() // value
-        .Arg<ffi::BufferR1<ffi::DataType::S32>>() // cu_seqlens_q
-        .Arg<ffi::BufferR1<ffi::DataType::S32>>() // cu_seqlens_k
-        .Attr<int>("max_seqlen_q")
-        .Attr<int>("max_seqlen_k")
-        .Attr<int>("window_size_left")
-        .Attr<int>("window_size_right")
-        .Attr<float>("softmax_scale")
-        .Attr<bool>("is_causal")
-        .Ret<ffi::BufferR3<ffi::DataType::F16>>() // res
-        .Ret<ffi::BufferR2<ffi::DataType::F32>>() // softmax_lse
 );
 
 XLA_FFI_DEFINE_HANDLER_SYMBOL(
@@ -642,4 +728,53 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Ret<ffi::BufferR4<ffi::DataType::F16>>() // dk
         .Ret<ffi::BufferR4<ffi::DataType::F16>>() // dv
         .Ret<ffi::BufferR3<ffi::DataType::F32>>() // softmax_d
+);
+
+XLA_FFI_DEFINE_HANDLER_SYMBOL(
+    FlashAttentionHopperF16VarlenFwd,
+    FlashAttentionHopperF16VarlenFwdImpl,
+    ffi::Ffi::Bind()
+        .Ctx<ffi::PlatformStream<cudaStream_t>>()
+        .Arg<ffi::BufferR3<ffi::DataType::F16>>() // query
+        .Arg<ffi::BufferR3<ffi::DataType::F16>>() // key
+        .Arg<ffi::BufferR3<ffi::DataType::F16>>() // value
+        .Arg<ffi::BufferR1<ffi::DataType::S32>>() // cu_seqlens_q
+        .Arg<ffi::BufferR1<ffi::DataType::S32>>() // cu_seqlens_k
+        .Attr<int>("max_seqlen_q")
+        .Attr<int>("max_seqlen_k")
+        .Attr<int>("window_size_left")
+        .Attr<int>("window_size_right")
+        .Attr<float>("softmax_scale")
+        .Attr<bool>("is_causal")
+        .Ret<ffi::BufferR3<ffi::DataType::F16>>() // res
+        .Ret<ffi::BufferR2<ffi::DataType::F32>>() // softmax_lse
+);
+
+XLA_FFI_DEFINE_HANDLER_SYMBOL(
+    FlashAttentionHopperF16VarlenBwd,
+    FlashAttentionHopperF16VarlenBwdImpl,
+    ffi::Ffi::Bind()
+        .Ctx<ffi::PlatformStream<cudaStream_t>>()
+        .Arg<ffi::BufferR3<ffi::DataType::F16>>() // dout
+        .Arg<ffi::BufferR3<ffi::DataType::F16>>() // query
+        .Arg<ffi::BufferR3<ffi::DataType::F16>>() // key
+        .Arg<ffi::BufferR3<ffi::DataType::F16>>() // value
+        .Arg<ffi::BufferR3<ffi::DataType::F16>>() // out
+        .Arg<ffi::BufferR1<ffi::DataType::S32>>() // cu_seqlens_q
+        .Arg<ffi::BufferR1<ffi::DataType::S32>>() // cu_seqlens_k
+        .Arg<ffi::BufferR2<ffi::DataType::F32>>() // softmax_lse
+        .Arg<ffi::BufferR2<ffi::DataType::F32>>() // softmax_lse_log2
+        .Arg<ffi::BufferR3<ffi::DataType::F32>>() // dq_accum
+        .Arg<ffi::BufferR3<ffi::DataType::S32>>() // dq_semaphore
+        .Attr<int>("max_seqlen_q")
+        .Attr<int>("max_seqlen_k")
+        .Attr<int>("window_size_left")
+        .Attr<int>("window_size_right")
+        .Attr<float>("softmax_scale")
+        .Attr<bool>("causal")
+        .Attr<bool>("deterministic")
+        .Ret<ffi::BufferR3<ffi::DataType::F16>>() // dq
+        .Ret<ffi::BufferR3<ffi::DataType::F16>>() // dk
+        .Ret<ffi::BufferR3<ffi::DataType::F16>>() // dv
+        .Ret<ffi::BufferR2<ffi::DataType::F32>>() // softmax_d
 );

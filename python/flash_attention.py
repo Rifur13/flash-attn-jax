@@ -23,6 +23,27 @@ jex.ffi.register_ffi_target(
     platform="CUDA",
 )
 
+jex.ffi.register_ffi_target(
+    "flash_attention_hopper_f16_bwd",
+    flash_attn_jax_lib.flash_attention_hopper_f16_bwd(),
+    platform="CUDA",
+)
+
+jex.ffi.register_ffi_target(
+    "flash_attention_hopper_f16_varlen_bwd",
+    flash_attn_jax_lib.flash_attention_hopper_f16_varlen_bwd(),
+    platform="CUDA",
+)
+
+
+def get_k_block_m(head_dim: int):
+    if head_dim <= 64:
+        return 128
+    elif head_dim < 256:
+        return 64
+    else:
+        return 32
+
 
 @functools.partial(jax.custom_vjp, nondiff_argnums=range(3, 8))
 @functools.partial(
@@ -39,20 +60,20 @@ def flash_attention_hopper(
     query: ArrayLike,
     key: ArrayLike,
     value: ArrayLike,
-    softmax_scale: float | None = None,
-    causal: bool = False,
     window_size_left: int = -1,
     window_size_right: int = -1,
+    softmax_scale: float | None = None,
+    causal: bool = False,
     deterministic: bool = True,
 ):
     out, _ = _flash_attention_hopper_fwd(
         query,
         key,
         value,
-        softmax_scale,
-        causal,
         window_size_left,
         window_size_right,
+        softmax_scale,
+        causal,
         deterministic,
     )
 
@@ -63,10 +84,10 @@ def _flash_attention_hopper_fwd(
     query: ArrayLike,
     key: ArrayLike,
     value: ArrayLike,
-    softmax_scale: float | None,
-    causal: bool,
     window_size_left: int,
     window_size_right: int,
+    softmax_scale: float | None,
+    causal: bool,
     deterministic: bool,
 ):
     del window_size_left, window_size_right, deterministic
@@ -133,10 +154,10 @@ def _flash_attention_hopper_fwd(
 
 
 def _flash_attention_hopper_bwd(
-    softmax_scale: float | None,
-    causal: bool,
     window_size_left: int,
     window_size_right: int,
+    softmax_scale: float | None,
+    causal: bool,
     deterministic: bool,
     res,
     dout: jax.Array,
@@ -157,19 +178,11 @@ def _flash_attention_hopper_bwd(
         and out.ndim == 4
     ):
         raise ValueError(
-            f"query/key/value should be 4-dim, but are {query.ndim}/{key.ndim}/{value.ndim}/{dout.ndim}/{out.ndim}"
+            f"query/key/value/dout/out should be 4-dim, but are {query.ndim}/{key.ndim}/{value.ndim}/{dout.ndim}/{out.ndim}"
         )
 
     batch_size, seq_len_q, num_heads_q, head_dim = query.shape
     seq_len_kv, num_heads_kv = key.shape[1], key.shape[2]
-
-    def get_k_block_m(head_size: int):
-        if head_size <= 64:
-            return 128
-        elif head_size < 256:
-            return 64
-        else:
-            return 32
 
     k_block_m = get_k_block_m(head_dim)
     seqlen_q_rounded = round_multiple(seq_len_q, k_block_m)
@@ -201,12 +214,6 @@ def _flash_attention_hopper_bwd(
 
     dq_semaphore = jnp.zeros(
         ((seq_len_q + k_block_m - 1) // 64, batch_size, num_heads_q), jnp.int32
-    )
-
-    jex.ffi.register_ffi_target(
-        "flash_attention_hopper_f16_bwd",
-        flash_attn_jax_lib.flash_attention_hopper_f16_bwd(),
-        platform="CUDA",
     )
 
     softmax_lse_log2 = jnp.empty(
@@ -243,10 +250,10 @@ def _flash_attention_hopper_bwd(
         softmax_lse_log2,
         dq_accum,
         dq_semaphore,
-        softmax_scale=np.float32(softmax_scale),
-        causal=np.bool_(causal),
         window_size_left=np.int32(window_size_left),
         window_size_right=np.int32(window_size_right),
+        softmax_scale=np.float32(softmax_scale),
+        causal=np.bool_(causal),
         deterministic=np.bool_(deterministic),
         vectorized=False,
     )
@@ -279,7 +286,20 @@ def _flash_attention_hopper_bwd(
 flash_attention_hopper.defvjp(_flash_attention_hopper_fwd, _flash_attention_hopper_bwd)
 
 
-def flash_attention_hopper_varlen_fwd(
+@functools.partial(jax.custom_vjp, nondiff_argnums=range(5, 12))
+@functools.partial(
+    jax.jit,
+    static_argnames=[
+        "max_seqlen_q",
+        "max_seqlen_k",
+        "window_size_left",
+        "window_size_right",
+        "softmax_scale",
+        "causal",
+        "deterministic",
+    ],
+)
+def flash_attention_hopper_varlen(
     query: ArrayLike,
     key: ArrayLike,
     value: ArrayLike,
@@ -291,7 +311,43 @@ def flash_attention_hopper_varlen_fwd(
     window_size_right: int = -1,
     softmax_scale: float | None = None,
     causal: bool = False,
+    deterministic: bool = True,
 ):
+    out, res = _flash_attention_hopper_varlen_fwd(
+        query,
+        key,
+        value,
+        cu_seqlens_q,
+        cu_seqlens_k,
+        max_seqlen_q,
+        max_seqlen_k,
+        window_size_left,
+        window_size_right,
+        softmax_scale,
+        causal,
+        deterministic,
+    )
+
+    query, key, value, cu_seqlens_q, cu_seqlens_k, out, softmax_lse = res
+
+    return out, softmax_lse
+
+
+def _flash_attention_hopper_varlen_fwd(
+    query: ArrayLike,
+    key: ArrayLike,
+    value: ArrayLike,
+    cu_seqlens_q: ArrayLike,
+    cu_seqlens_k: ArrayLike,
+    max_seqlen_q: int,
+    max_seqlen_k: int,
+    window_size_left: int,
+    window_size_right: int,
+    softmax_scale: float | None,
+    causal: bool,
+    deterministic: bool,
+):
+    del deterministic
     # (TODO pobudzey): check for sm90
 
     if not (query.ndim == 3 and key.ndim == 3 and value.ndim == 3):
@@ -300,11 +356,11 @@ def flash_attention_hopper_varlen_fwd(
         )
 
     batch_size = cu_seqlens_q.size - 1
-    total_q, num_heads, head_size = query.shape
+    total_q, num_heads, head_dim = query.shape
     total_k, num_heads_k, _ = key.shape
 
     if softmax_scale is None:
-        softmax_scale = 1 / math.sqrt(head_size)
+        softmax_scale = 1 / math.sqrt(head_dim)
 
     _check_dtype(query, [jnp.float16], "query")
     _check_dtype(key, query.dtype, "key")
@@ -313,10 +369,8 @@ def flash_attention_hopper_varlen_fwd(
     _check_dtype(cu_seqlens_q, jnp.int32, "cu_seqlens_q")
     _check_dtype(cu_seqlens_k, jnp.int32, "cu_seqlens_k")
 
-    if head_size not in [64, 128, 256]:
-        raise ValueError(
-            f"head_dim must be one of [64, 128, 256], but got {head_size}."
-        )
+    if head_dim not in [64, 128, 256]:
+        raise ValueError(f"head_dim must be one of [64, 128, 256], but got {head_dim}.")
 
     if num_heads % num_heads_k != 0:
         raise ValueError(
@@ -324,9 +378,9 @@ def flash_attention_hopper_varlen_fwd(
             f"key/value heads, but got {num_heads} vs {num_heads_k}"
         )
 
-    _check_shape(query, (total_q, num_heads, head_size), "query")
-    _check_shape(key, (total_k, num_heads_k, head_size), "key")
-    _check_shape(value, (total_k, num_heads_k, head_size), "value")
+    _check_shape(query, (total_q, num_heads, head_dim), "query")
+    _check_shape(key, (total_k, num_heads_k, head_dim), "key")
+    _check_shape(value, (total_k, num_heads_k, head_dim), "value")
 
     _check_shape(cu_seqlens_q, (batch_size + 1,), "cu_seqlens_q")
     _check_shape(cu_seqlens_k, (batch_size + 1,), "cu_seqlens_k")
@@ -353,4 +407,115 @@ def flash_attention_hopper_varlen_fwd(
         vectorized=False,
     )
 
-    return out, (query, key, value, out, softmax_lse)
+    return out, (query, key, value, cu_seqlens_q, cu_seqlens_k, out, softmax_lse)
+
+
+def _flash_attention_hopper_varlen_bwd(
+    max_seqlen_q: int,
+    max_seqlen_k: int,
+    window_size_left: int,
+    window_size_right: int,
+    softmax_scale: float | None,
+    causal: bool,
+    deterministic: bool,
+    res,
+    dout: jax.Array,
+):
+    # (TODO pobudzey): check for sm90
+
+    query, key, value, cu_seqlens_q, cu_seqlens_k, out, softmax_lse = res
+
+    if not (
+        query.ndim == 3
+        and key.ndim == 3
+        and value.ndim == 3
+        and dout.ndim == 3
+        and out.ndim == 3
+    ):
+        raise ValueError(
+            f"query/key/value/dout/out should be 3-dim, but are {query.ndim}/{key.ndim}/{value.ndim}/{dout.ndim}/{out.ndim}"
+        )
+
+    batch_size = cu_seqlens_q.size - 1
+    total_q, num_heads, head_dim = query.shape
+    total_k, num_heads_k, _ = key.shape
+
+    k_block_m = get_k_block_m(head_dim)
+    total_q_padded_rounded = round_multiple(total_q + batch_size * 128, 128)
+
+    if softmax_scale is None:
+        softmax_scale = 1 / math.sqrt(head_dim)
+
+    _check_dtype(query, [jnp.float16], "query")
+    _check_dtype(key, query.dtype, "key")
+    _check_dtype(value, query.dtype, "value")
+    _check_dtype(dout, query.dtype, "dout")
+    _check_dtype(out, query.dtype, "out")
+
+    _check_dtype(cu_seqlens_q, jnp.int32, "cu_seqlens_q")
+    _check_dtype(cu_seqlens_k, jnp.int32, "cu_seqlens_k")
+
+    if head_dim not in [64, 128]:
+        raise ValueError(f"head_dim must be one of [64, 128], but got {head_dim}.")
+
+    if num_heads != num_heads_k:
+        raise ValueError(
+            f"Only multi-headed attention is supported. Query heads must equal key/value heads, but got {num_heads} vs {num_heads_k}."
+        )
+
+    _check_shape(query, (total_q, num_heads, head_dim), "query")
+    _check_shape(key, (total_k, num_heads_k, head_dim), "key")
+    _check_shape(value, (total_k, num_heads_k, head_dim), "value")
+
+    _check_shape(cu_seqlens_q, (batch_size + 1,), "cu_seqlens_q")
+    _check_shape(cu_seqlens_k, (batch_size + 1,), "cu_seqlens_k")
+
+    dq_semaphore = jnp.zeros(
+        ((max_seqlen_q + k_block_m - 1) // k_block_m, batch_size, num_heads), jnp.int32
+    )
+
+    softmax_lse_log2 = jnp.empty((num_heads, total_q_padded_rounded), dtype=jnp.float32)
+
+    dq_accum = jnp.empty(
+        (num_heads, total_q_padded_rounded, head_dim), dtype=jnp.float32
+    )
+
+    out_type = [
+        jax.ShapeDtypeStruct([total_q, num_heads, head_dim], query.dtype),  # dq
+        jax.ShapeDtypeStruct([total_k, num_heads, head_dim], key.dtype),  # dk
+        jax.ShapeDtypeStruct([total_k, num_heads, head_dim], value.dtype),  # dv
+        jax.ShapeDtypeStruct(
+            [num_heads, total_q_padded_rounded], jnp.float32
+        ),  # softmax_d
+    ]
+
+    dq, dk, dv, _ = jex.ffi.ffi_call(
+        "flash_attention_hopper_f16_varlen_bwd",
+        out_type,
+        dout,
+        query,
+        key,
+        value,
+        out,
+        cu_seqlens_q,
+        cu_seqlens_k,
+        softmax_lse,
+        softmax_lse_log2,
+        dq_accum,
+        dq_semaphore,
+        max_seqlen_q=np.int32(max_seqlen_q),
+        max_seqlen_k=np.int32(max_seqlen_k),
+        window_size_left=np.int32(window_size_left),
+        window_size_right=np.int32(window_size_right),
+        softmax_scale=np.float32(softmax_scale),
+        causal=np.bool_(causal),
+        deterministic=np.bool_(deterministic),
+        vectorized=False,
+    )
+
+    return dq, dk, dv, None, None
+
+
+flash_attention_hopper_varlen.defvjp(
+    _flash_attention_hopper_varlen_fwd, _flash_attention_hopper_varlen_bwd
+)
